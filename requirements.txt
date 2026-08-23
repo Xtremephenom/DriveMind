@@ -1,0 +1,8 @@
+fastapi==0.141.1
+uvicorn==0.52.4
+pytest==9.1.1
+psutil==7.2.2
+pywin32==312
+python-dotenv==1.2.3
+PyYAML==6.0.3
+httpx2==2.12.0

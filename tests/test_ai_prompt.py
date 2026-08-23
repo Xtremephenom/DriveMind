@@ -69,3 +69,9 @@ def test_prompt_requires_json():
 def test_system_instruction_is_non_empty():
     assert SYSTEM_INSTRUCTION
     assert "DriveMind" in SYSTEM_INSTRUCTION
+
+def test_prompt_does_not_expose_current_decision():
+    prompt = build_ai_prompt(make_case())
+
+    assert "current_action" not in prompt
+    assert "current_risk" not in prompt

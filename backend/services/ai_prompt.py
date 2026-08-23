@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from backend.models.system import AICase, ai_case_to_dict
+from backend.models.system import AICase
 
 
 SYSTEM_INSTRUCTION = """
@@ -39,22 +39,43 @@ Return exactly this JSON structure:
 
 def build_ai_prompt(case: AICase) -> str:
     """
-    Build the model input for a DriveMind AI case.
+    Build the model-facing prompt for a DriveMind case.
 
-    The prompt contains only structured case information.
+    The model receives filesystem evidence only.
+    Deterministic DriveMind decisions are intentionally hidden
+    from the model because they are used as ground-truth labels.
     """
 
-    case_data = ai_case_to_dict(case)
+    context_dict = {
+        "path": case.context.path,
+        "size": case.context.size,
+        "extension": case.context.extension,
+        "category": case.context.category.value,
+        "exists": case.context.exists,
+        "age_days": case.context.age_days,
+        "is_system_path": case.context.is_system_path,
+        "is_user_path": case.context.is_user_path,
+        "is_application_path": case.context.is_application_path,
+        "is_locked": case.context.is_locked,
+        "signals": case.context.signals,
+    }
+
+    case_data = {
+        "case_id": case.case_id,
+        "context": context_dict,
+    }
+
+    case_json = json.dumps(
+        case_data,
+        indent=2,
+        ensure_ascii=False,
+    )
 
     return (
         SYSTEM_INSTRUCTION
         + "\n\n"
         + "CASE:\n"
-        + json.dumps(
-            case_data,
-            indent=2,
-            ensure_ascii=False,
-        )
+        + case_json
         + "\n\n"
         + "Analyze the case and return only the required JSON."
     )

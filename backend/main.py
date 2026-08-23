@@ -1,0 +1,12 @@
+from fastapi import FastAPI
+
+from backend.api.routes import router
+
+
+app = FastAPI(
+    title="DriveMind",
+    description="Local intelligent disk analysis and cleanup engine.",
+    version="0.1.0",
+)
+
+app.include_router(router)

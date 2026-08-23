@@ -1,0 +1,48 @@
+# Python virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Pytest
+.pytest_cache/
+
+# Coverage
+.coverage
+htmlcov/
+.coverage.*
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Local model files
+models/*.gguf
+models/*.safetensors
+models/*.bin
+models/*.pt
+models/*.pth
+
+# Training artifacts
+artifacts/
+checkpoints/
+outputs/
+
+# Local datasets
+data/
+datasets/
+
+# Local scan/test artifacts
+scanner_test/
+
+# IDE
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

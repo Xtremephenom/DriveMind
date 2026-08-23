@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from backend.services.scanner import scan_directory
+from backend.services.scanner import scan_directory, directory_to_dict
 from backend.services.analysis import analyze_tree, analysis_to_dict
 
 

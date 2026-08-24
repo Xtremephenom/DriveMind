@@ -24,14 +24,12 @@ Safety rules:
    "keep", "review", "delete".
 9. The risk must be exactly one of:
    "low", "medium", "high".
-10. Confidence must be a number between 0 and 1.
 
 Return exactly this JSON structure:
 
 {
   "action": "keep|review|delete",
   "risk": "low|medium|high",
-  "confidence": 0.0,
   "explanation": "short explanation"
 }
 """.strip()

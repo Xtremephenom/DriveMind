@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,21 +7,59 @@ from backend.main import app
 
 client = TestClient(app)
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCANNER_TEST = REPO_ROOT / "scanner_test"
+
+@pytest.fixture(scope="session")
+def scanner_tree(tmp_path_factory):
+    """
+    The three-file tree these tests scan, built here rather than read
+    from `scanner_test/` in the repository.
+
+    That directory is gitignored, so a fresh clone does not have it, and
+    five of the tests below failed with 404 until someone ran the `mkdir`
+    buried in the README's "Run a scan" section. A suite that passes only
+    on a machine which has already been used by hand is not the check
+    that tells you a clone is good.
+
+    The route resolves scope from the path alone but then stats the
+    target, which is why these five need a real directory while
+    `test_scan_scope.py` does not -- the gate is path arithmetic, the 404
+    is filesystem truth.
+
+    Three details the assertions below depend on: three files in total,
+    `file1.txt` directly at the root for the path-is-a-file case, and two
+    levels of nesting so the depth cap has something to refuse.
+    """
+
+    root = tmp_path_factory.mktemp("scanner_tree")
+
+    (root / "folder1" / "subfolder").mkdir(parents=True)
+
+    (root / "file1.txt").write_text("file one", encoding="utf-8")
+
+    (root / "folder1" / "file2.txt").write_text(
+        "file two xyz",
+        encoding="utf-8",
+    )
+
+    (root / "folder1" / "subfolder" / "file3.txt").write_text(
+        "file  3",
+        encoding="utf-8",
+    )
+
+    return root
 
 
 @pytest.fixture(autouse=True)
-def allow_scanner_test(monkeypatch):
+def allow_scanner_tree(monkeypatch, scanner_tree):
     """Grant the dev API access to the fixture tree, and only to it."""
 
-    monkeypatch.setenv(ENV_ALLOWED_ROOTS, str(SCANNER_TEST))
+    monkeypatch.setenv(ENV_ALLOWED_ROOTS, str(scanner_tree))
 
 
-def test_analyze_endpoint():
+def test_analyze_endpoint(scanner_tree):
     response = client.get(
         "/analyze",
-        params={"path": str(SCANNER_TEST)},
+        params={"path": str(scanner_tree)},
     )
 
     assert response.status_code == 200
@@ -35,19 +71,19 @@ def test_analyze_endpoint():
     assert len(data["recommendations"]) == 3
 
 
-def test_analyze_missing_directory():
+def test_analyze_missing_directory(scanner_tree):
     response = client.get(
         "/analyze",
-        params={"path": str(SCANNER_TEST / "does_not_exist")},
+        params={"path": str(scanner_tree / "does_not_exist")},
     )
 
     assert response.status_code == 404
 
 
-def test_analyze_file_path():
+def test_analyze_file_path(scanner_tree):
     response = client.get(
         "/analyze",
-        params={"path": str(SCANNER_TEST / "file1.txt")},
+        params={"path": str(scanner_tree / "file1.txt")},
     )
 
     assert response.status_code == 400
@@ -81,8 +117,8 @@ def test_paths_outside_scope_are_refused(endpoint, path):
 
 
 @pytest.mark.parametrize("endpoint", ["/scan", "/analyze"])
-def test_traversal_out_of_an_allowed_root_is_refused(endpoint):
-    escape = str(SCANNER_TEST / ".." / ".." / "Windows")
+def test_traversal_out_of_an_allowed_root_is_refused(endpoint, scanner_tree):
+    escape = str(scanner_tree / ".." / ".." / "Windows")
 
     response = client.get(endpoint, params={"path": escape})
 
@@ -90,36 +126,39 @@ def test_traversal_out_of_an_allowed_root_is_refused(endpoint):
 
 
 @pytest.mark.parametrize("endpoint", ["/scan", "/analyze"])
-def test_empty_allow_list_denies_everything(endpoint, monkeypatch):
+def test_empty_allow_list_denies_everything(
+    endpoint,
+    monkeypatch,
+    scanner_tree,
+):
     monkeypatch.delenv(ENV_ALLOWED_ROOTS, raising=False)
 
-    response = client.get(endpoint, params={"path": str(SCANNER_TEST)})
+    response = client.get(endpoint, params={"path": str(scanner_tree)})
 
     assert response.status_code == 400
     assert "DRIVEMIND_ALLOWED_ROOTS" in response.json()["detail"]
 
 
-def test_depth_cap_is_enforced(monkeypatch):
+def test_depth_cap_is_enforced(monkeypatch, scanner_tree):
     monkeypatch.setenv("DRIVEMIND_MAX_SCAN_DEPTH", "1")
 
-    response = client.get("/scan", params={"path": str(SCANNER_TEST)})
+    response = client.get("/scan", params={"path": str(scanner_tree)})
 
     assert response.status_code == 400
     assert "depth" in response.json()["detail"]
 
 
-def test_node_cap_is_enforced(monkeypatch):
+def test_node_cap_is_enforced(monkeypatch, scanner_tree):
     monkeypatch.setenv("DRIVEMIND_MAX_SCAN_NODES", "1")
 
-    response = client.get("/scan", params={"path": str(SCANNER_TEST)})
+    response = client.get("/scan", params={"path": str(scanner_tree)})
 
     assert response.status_code == 400
     assert "nodes" in response.json()["detail"]
 
 
-def test_scan_inside_scope_still_works():
-    response = client.get("/scan", params={"path": str(SCANNER_TEST)})
+def test_scan_inside_scope_still_works(scanner_tree):
+    response = client.get("/scan", params={"path": str(scanner_tree)})
 
     assert response.status_code == 200
     assert response.json()["scanned"] is True
-

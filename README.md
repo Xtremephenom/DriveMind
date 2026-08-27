@@ -73,10 +73,18 @@ This is the check that tells you the clone is good:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expected: **441 passed, 1 skipped**. The skip is
-`test_symlink_is_detected_and_not_followed`, which needs
-`SeCreateSymbolicLinkPrivilege` — enable Developer Mode or use an elevated
-shell to run it. It skips cleanly rather than failing. The junction
+Expected on a fresh clone: **438 passed, 4 skipped**. Nothing has to be
+created by hand first — the suite builds every tree it scans in a temporary
+directory, so a clone is good or bad on its own.
+
+Three of the four skips are the dataset contract tests, which have nothing
+to read until `data/` exists (`.gitignore` excludes it). Build it — see
+[Build the training corpus](#build-the-training-corpus) — and they run,
+giving **441 passed, 1 skipped**.
+
+The remaining skip is `test_symlink_is_detected_and_not_followed`, which
+needs `SeCreateSymbolicLinkPrivilege` — enable Developer Mode or use an
+elevated shell to run it. It skips cleanly rather than failing. The junction
 equivalent does run, because `mklink /J` needs no privilege.
 
 Test count is not a vanity metric here. Most of what this codebase asserts

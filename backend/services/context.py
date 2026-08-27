@@ -41,6 +41,42 @@ def build_decision_context(
     )
 
 
+def context_to_file_and_evidence(
+    context: DecisionContext,
+) -> tuple[FileRecord, FileEvidence]:
+    """
+    Reverse of `build_decision_context`.
+
+    Recovers the evidence a context was built from, deliberately
+    dropping `current_action` / `current_risk`: those are a *conclusion*,
+    and anything that needs the conclusion must re-derive it from this
+    evidence rather than trust the caller's copy (§443).
+    """
+
+    file = FileRecord(
+        path=context.path,
+        size=context.size,
+        category=context.category,
+        extension=context.extension,
+    )
+
+    evidence = FileEvidence(
+        path=context.path,
+        size=context.size,
+        extension=context.extension,
+        age_days=context.age_days,
+        exists=context.exists,
+        is_locked=context.is_locked,
+        is_system_path=context.is_system_path,
+        is_user_path=context.is_user_path,
+        is_application_path=context.is_application_path,
+        category=context.category,
+        signals=list(context.signals),
+    )
+
+    return file, evidence
+
+
 def context_to_dict(
     context: DecisionContext,
 ) -> dict:

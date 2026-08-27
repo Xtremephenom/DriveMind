@@ -41,11 +41,21 @@ def make_case():
 def test_prompt_contains_case_data():
     prompt = build_ai_prompt(make_case())
 
-    assert "test-case-001" in prompt
     assert r"C:\\Temp\\old.tmp" in prompt
     assert ".tmp" in prompt
     assert "temporary" in prompt
     assert "90" in prompt
+
+
+def test_prompt_does_not_carry_the_case_id():
+    # The response contract is {action, risk, explanation}, so nothing
+    # asks the model to echo an id. Keeping it out also makes the prompt
+    # exactly the evidence, which is what the dataset build's leakage
+    # check compares.
+    prompt = build_ai_prompt(make_case())
+
+    assert "test-case-001" not in prompt
+    assert "case_id" not in prompt
 
 
 def test_prompt_contains_safety_instruction():
@@ -62,8 +72,16 @@ def test_prompt_requires_json():
     assert "valid JSON" in prompt
     assert '"action"' in prompt
     assert '"risk"' in prompt
-    assert '"confidence"' in prompt
     assert '"explanation"' in prompt
+
+
+def test_prompt_does_not_request_confidence():
+    # An uncalibrated self-reported confidence is not evidence.
+    # The prompt, the parser and the training data must agree that
+    # the contract is exactly {action, risk, explanation}.
+    prompt = build_ai_prompt(make_case())
+
+    assert "confidence" not in prompt
 
 
 def test_system_instruction_is_non_empty():

@@ -27,7 +27,6 @@ def parse_ai_response(raw_text: str) -> AIResponse:
     required = {
         "action",
         "risk",
-        "confidence",
         "explanation",
     }
 
@@ -53,20 +52,10 @@ def parse_ai_response(raw_text: str) -> AIResponse:
             f"Invalid AI risk: {data['risk']!r}."
         ) from exc
 
-    confidence = data["confidence"]
-
-    if isinstance(confidence, bool) or not isinstance(
-        confidence,
-        (int, float),
-    ):
-        raise ValueError("AI confidence must be a number.")
-
-    confidence = float(confidence)
-
-    if not 0.0 <= confidence <= 1.0:
-        raise ValueError(
-            "AI confidence must be between 0 and 1."
-        )
+    # A confidence field is deliberately NOT part of the contract.
+    # An uncalibrated self-reported confidence is not evidence, so it
+    # is neither required nor carried into the domain model. If a model
+    # volunteers one it is ignored rather than treated as a signal.
 
     explanation = data["explanation"]
 
@@ -77,6 +66,5 @@ def parse_ai_response(raw_text: str) -> AIResponse:
         case_id=str(data.get("case_id", "")),
         action=action,
         risk=risk,
-        confidence=confidence,
         explanation=explanation,
     )

@@ -42,6 +42,16 @@ def build_ai_prompt(case: AICase) -> str:
     The model receives filesystem evidence only.
     Deterministic DriveMind decisions are intentionally hidden
     from the model because they are used as ground-truth labels.
+
+    The `case_id` is deliberately absent. The response contract is
+    `{action, risk, explanation}`, so nothing ever asks the model to echo
+    an id back, and a field the model is shown but never asked about is
+    noise it has to learn to ignore. Excluding it also makes the prompt
+    exactly the evidence, which is what lets the dataset build detect
+    train/test leakage by comparing prompts: identical evidence now
+    renders as an identical string instead of being disguised by a
+    different hash. Correlation between a case and its answer is the
+    caller's job -- see `ai_review.review_file`, which holds both.
     """
 
     context_dict = {
@@ -58,13 +68,8 @@ def build_ai_prompt(case: AICase) -> str:
         "signals": case.context.signals,
     }
 
-    case_data = {
-        "case_id": case.case_id,
-        "context": context_dict,
-    }
-
     case_json = json.dumps(
-        case_data,
+        {"context": context_dict},
         indent=2,
         ensure_ascii=False,
     )

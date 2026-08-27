@@ -6,13 +6,27 @@ from pathlib import Path
 from backend.models.system import AICase
 from backend.services.ai_prompt import build_ai_prompt
 from backend.services.dataset.labeler import label_case
+from backend.services.decision.engine import POLICY_VERSION
 
 
 def case_to_training_example(case: AICase) -> dict:
+    """
+    One JSONL row.
+
+    `policy_version` is stamped on every row, not recorded once in a
+    sidecar, because rows travel. A `train.jsonl` uploaded to a training
+    machine has no repository attached, and a label whose policy is
+    unknown cannot be interpreted or compared (§516). It sits outside
+    `response` so it is never mistaken for something the model should
+    produce -- the response contract is exactly
+    `{action, risk, explanation}`.
+    """
+
     recommendation = label_case(case)
 
     return {
         "case_id": case.case_id,
+        "policy_version": POLICY_VERSION,
         "prompt": build_ai_prompt(case),
         "response": {
             "action": recommendation.action.value,

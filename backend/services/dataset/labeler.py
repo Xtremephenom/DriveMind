@@ -1,46 +1,15 @@
 from __future__ import annotations
 
-from backend.models.system import (
-    AICase,
-    FileEvidence,
-    FileRecord,
-)
-
-from backend.services.decision.engine import make_recommendation
+from backend.models.system import AICase, Recommendation
+from backend.services.decision.engine import recommend_for_context
 
 
-def label_case(case: AICase):
+def label_case(case: AICase) -> Recommendation:
     """
     Produce the trusted DriveMind label for a synthetic case.
 
     The deterministic decision engine is the single source
-    of truth for the expected action and risk.
+    of truth for the expected action and risk (§65).
     """
 
-    file = FileRecord(
-        path=case.context.path,
-        size=case.context.size,
-        category=case.context.category,
-        extension=case.context.extension,
-    )
-
-    evidence = FileEvidence(
-        path=case.context.path,
-        size=case.context.size,
-        extension=case.context.extension,
-        age_days=case.context.age_days,
-        exists=case.context.exists,
-        is_locked=case.context.is_locked,
-        is_system_path=case.context.is_system_path,
-        is_user_path=case.context.is_user_path,
-        is_application_path=case.context.is_application_path,
-        category=case.context.category,
-        signals=case.context.signals,
-    )
-
-    recommendation = make_recommendation(
-        file,
-        evidence,
-    )
-
-    return recommendation
+    return recommend_for_context(case.context)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from backend.models.system import (
+    DecisionContext,
     FileCategory,
     FileEvidence,
     FileRecord,
@@ -8,6 +9,42 @@ from backend.models.system import (
     RecommendationAction,
     RecommendationRisk,
 )
+from backend.services.context import context_to_file_and_evidence
+
+
+POLICY_VERSION = "policy-v1"
+"""
+The version of the deterministic policy implemented in this module.
+
+It exists because a label is meaningless without it. `data/train.jsonl` on
+a training machine, a recorded agreement figure in a report, and a model
+checkpoint are all statements about *some* policy, and until this constant
+existed the only record of which one was prose in an ADR (§514/§516).
+
+Bump it in the same commit that changes any verdict `make_recommendation`
+emits, and publish `docs/policy-v<n>.md` alongside. Metrics measured under
+different values are not comparable and must not be presented as a trend.
+`docs/policy-v1.md` states the full procedure.
+"""
+
+
+def recommend_for_context(
+    context: DecisionContext,
+) -> Recommendation:
+    """
+    Re-derive the authoritative recommendation for a decision context.
+
+    `DecisionContext` carries `current_action` / `current_risk` so that
+    ground truth can travel with a case, but those fields are supplied by
+    whoever built the case and are therefore not authority. Every caller
+    that needs the deterministic verdict — the safety gate, the dataset
+    labeler — must come through here so the verdict is always computed,
+    never accepted (§28/§65/§443).
+    """
+
+    file, evidence = context_to_file_and_evidence(context)
+
+    return make_recommendation(file, evidence)
 
 
 def make_recommendation(

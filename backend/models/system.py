@@ -67,12 +67,6 @@ class FileRecord:
     extension: str | None = None
     reason: str | None = None
 
-class RiskLevel(str, Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-
-
 class RecommendationAction(str, Enum):
     DELETE = "delete"
     REVIEW = "review"
@@ -104,13 +98,43 @@ class AnalysisResult:
         return len(self.files)
 
     @property
-    def total_recommended_size(self) -> int:
+    def review_size(self) -> int:
+        """
+        Bytes held by files a human should look at.
+
+        This is **not** reclaimable space. `REVIEW` is an instruction to a
+        person, not a verdict on the file, and a large share of these bytes
+        will be kept once someone looks. Presenting this number as
+        "space you can free" conflates action with risk (§23.7) and is a
+        claim the engine has not made (§555).
+        """
+
         return sum(
             recommendation.size
             for recommendation in self.recommendations
             if recommendation.action == RecommendationAction.REVIEW
         )
-    
+
+    @property
+    def deletable_size(self) -> int:
+        """
+        Bytes the engine has actually recommended deleting.
+
+        Currently always 0: `policy-v1` emits no `DELETE`, by design
+        (`docs/policy-v1.md`). This property exists so that the honest
+        answer to "how much can I free?" is a real measurement that
+        happens to be zero, rather than `review_size` standing in for it.
+        It starts reporting non-zero only when a policy that can produce
+        `DELETE` ships, which ADR 0002 gates on closing every recorded
+        policy gap.
+        """
+
+        return sum(
+            recommendation.size
+            for recommendation in self.recommendations
+            if recommendation.action == RecommendationAction.DELETE
+        )
+
 @dataclass
 class FileEvidence:
     path: str
@@ -161,30 +185,9 @@ class AICase:
     case_id: str
     context: DecisionContext
 
-def ai_case_to_dict(case: AICase) -> dict:
-    return {
-        "case_id": case.case_id,
-        "context": {
-            "path": case.context.path,
-            "size": case.context.size,
-            "extension": case.context.extension,
-            "category": case.context.category.value,
-            "exists": case.context.exists,
-            "age_days": case.context.age_days,
-            "is_system_path": case.context.is_system_path,
-            "is_user_path": case.context.is_user_path,
-            "is_application_path": case.context.is_application_path,
-            "is_locked": case.context.is_locked,
-            "signals": case.context.signals,
-            "current_action": case.context.current_action.value,
-            "current_risk": case.context.current_risk.value,
-        },
-    }
-
 @dataclass
 class AIResponse:
     case_id: str
     action: RecommendationAction
     risk: RecommendationRisk
-    confidence: float
     explanation: str

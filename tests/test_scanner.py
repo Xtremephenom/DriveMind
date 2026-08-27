@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from backend.services.scanner import (
+    ScanLimitExceeded,
     scan_directory,
     directory_to_dict,
 )
@@ -114,6 +115,119 @@ def test_multiple_files(tmp_path):
 
 def test_normal_directory_is_not_junction(tmp_path):
     assert is_junction(tmp_path) is False
+
+
+# --- Both reparse-point probes fail closed ----------------------------
+
+
+@pytest.mark.parametrize("error", [PermissionError, OSError])
+@pytest.mark.parametrize(
+    "probe, method",
+    [
+        (is_junction, "is_junction"),
+        (is_symlink, "is_symlink"),
+    ],
+)
+def test_an_undeterminable_path_is_treated_as_a_reparse_point(
+    tmp_path, monkeypatch, probe, method, error
+):
+    """
+    The regression this guards: `is_junction` answered False when the
+    probe raised, so a directory we could not inspect was traversed --
+    potentially following a redirect out of the scan scope. `is_symlink`
+    already failed closed; the two disagreed.
+    """
+
+    def raise_it(self):
+        raise error("Cannot determine.")
+
+    monkeypatch.setattr(Path, method, raise_it, raising=True)
+
+    assert probe(tmp_path) is True
+
+
+def test_an_unfollowable_directory_is_not_descended_into(
+    tmp_path, monkeypatch
+):
+    """
+    The consequence at the scanner level: the undeterminable directory is
+    recorded as a node and its contents are never read.
+    """
+
+    child = tmp_path / "opaque"
+    child.mkdir()
+    (child / "secret.txt").write_text("should never be read")
+
+    real_is_junction = Path.is_junction
+
+    def selective(self):
+        if self.name == "opaque":
+            raise PermissionError("Cannot determine.")
+        return real_is_junction(self)
+
+    monkeypatch.setattr(Path, "is_junction", selective, raising=True)
+
+    result = scan_directory(tmp_path)
+
+    (node,) = [
+        c for c in result.children if Path(c.path).name == "opaque"
+    ]
+
+    assert node.node_type == NodeType.JUNCTION
+    assert node.scanned is False
+    assert node.children == []
+
+
+# --- Traversal limits --------------------------------------------------
+
+
+def test_depth_limit_raises_rather_than_truncating(tmp_path):
+    create_test_tree(tmp_path)
+
+    # root=0, folder1=1, subfolder=2
+    with pytest.raises(ScanLimitExceeded, match="maximum depth"):
+        scan_directory(tmp_path, max_depth=2)
+
+
+def test_depth_limit_just_large_enough_succeeds(tmp_path):
+    create_test_tree(tmp_path)
+
+    result = scan_directory(tmp_path, max_depth=3)
+
+    assert result.size == 18
+
+
+def test_node_limit_raises(tmp_path):
+    create_test_tree(tmp_path)
+
+    with pytest.raises(ScanLimitExceeded, match="nodes"):
+        scan_directory(tmp_path, max_nodes=3)
+
+
+def test_node_limit_counts_every_node(tmp_path):
+    create_test_tree(tmp_path)
+
+    # 3 directories + 3 files
+    result = scan_directory(tmp_path, max_nodes=6)
+
+    assert result.size == 18
+
+    with pytest.raises(ScanLimitExceeded):
+        scan_directory(tmp_path, max_nodes=5)
+
+
+def test_deep_tree_does_not_raise_recursion_error(tmp_path):
+    deep = tmp_path
+
+    for index in range(80):
+        deep = deep / f"d{index}"
+
+    deep.mkdir(parents=True)
+
+    # The default depth cap must convert this into a clean, reported
+    # failure rather than a RecursionError.
+    with pytest.raises(ScanLimitExceeded):
+        scan_directory(tmp_path)
 
 
 def test_normal_file_is_not_symlink(tmp_path):

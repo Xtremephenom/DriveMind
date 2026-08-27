@@ -13,7 +13,6 @@ def test_valid_ai_response():
     {
         "action": "review",
         "risk": "low",
-        "confidence": 0.91,
         "explanation": "The file should be reviewed before cleanup."
     }
     """
@@ -22,7 +21,6 @@ def test_valid_ai_response():
 
     assert result.action == RecommendationAction.REVIEW
     assert result.risk == RecommendationRisk.LOW
-    assert result.confidence == 0.91
     assert result.explanation == (
         "The file should be reviewed before cleanup."
     )
@@ -37,8 +35,7 @@ def test_missing_field():
     raw = """
     {
         "action": "review",
-        "risk": "low",
-        "confidence": 0.9
+        "risk": "low"
     }
     """
 
@@ -51,7 +48,6 @@ def test_invalid_action():
     {
         "action": "destroy",
         "risk": "low",
-        "confidence": 0.9,
         "explanation": "Bad."
     }
     """
@@ -65,7 +61,6 @@ def test_invalid_risk():
     {
         "action": "review",
         "risk": "banana",
-        "confidence": 0.9,
         "explanation": "Bad."
     }
     """
@@ -74,35 +69,22 @@ def test_invalid_risk():
         parse_ai_response(raw)
 
 
-def test_confidence_must_be_number():
+def test_confidence_is_not_part_of_the_contract():
+    # A model that volunteers an uncalibrated confidence must still
+    # parse: the field is ignored, never carried into the domain model.
     raw = """
     {
         "action": "review",
         "risk": "low",
-        "confidence": "very confident",
-        "explanation": "Bad."
+        "confidence": 0.91,
+        "explanation": "Review before cleanup."
     }
     """
 
-    with pytest.raises(ValueError, match="confidence must be a number"):
-        parse_ai_response(raw)
+    result = parse_ai_response(raw)
 
-
-def test_confidence_must_be_between_zero_and_one():
-    raw = """
-    {
-        "action": "review",
-        "risk": "low",
-        "confidence": 1.5,
-        "explanation": "Bad."
-    }
-    """
-
-    with pytest.raises(
-        ValueError,
-        match="confidence must be between 0 and 1",
-    ):
-        parse_ai_response(raw)
+    assert result.action == RecommendationAction.REVIEW
+    assert not hasattr(result, "confidence")
 
 
 def test_explanation_must_be_string():
@@ -110,7 +92,6 @@ def test_explanation_must_be_string():
     {
         "action": "review",
         "risk": "low",
-        "confidence": 0.9,
         "explanation": 123
     }
     """

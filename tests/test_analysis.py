@@ -1,7 +1,11 @@
 from backend.models.system import (
+    AnalysisResult,
     FileCategory,
     FileSystemNode,
     NodeType,
+    Recommendation,
+    RecommendationAction,
+    RecommendationRisk,
 )
 
 from backend.services.analysis import (
@@ -143,3 +147,76 @@ def test_analysis_contains_evidence():
     assert evidence.size == 1000
     assert evidence.extension == ".tmp"
     assert evidence.is_system_path is True
+
+
+# --- Reported sizes separate attention from reclaimable space (§23.7) ---
+
+
+def test_review_bytes_are_not_reported_as_reclaimable():
+    """
+    The regression this guards: a single `total_recommended_size` summing
+    `REVIEW` items, surfaced under a name the user reads as "space you can
+    free". Every byte here needs a human decision; none of it is freed.
+    """
+
+    root = make_directory(
+        r"C:\Test",
+        [
+            make_file(r"C:\Windows\Temp\a.tmp", 1000),
+            make_file(r"C:\Users\Test\Documents\b.pdf", 2000),
+        ],
+    )
+
+    result = analyze_tree(root)
+
+    actions = {r.action for r in result.recommendations}
+
+    assert RecommendationAction.DELETE not in actions
+
+    assert result.review_size == 1000
+    assert result.deletable_size == 0
+
+    # The two are independent measurements, not a split of one total.
+    assert not hasattr(result, "total_recommended_size")
+
+
+def test_deletable_size_counts_only_delete():
+    """
+    `deletable_size` is 0 today because `policy-v1` emits no `DELETE`, so
+    the property is asserted against a hand-built `DELETE` recommendation.
+    A number that is only ever observed as zero is not a measurement.
+    """
+
+    result = AnalysisResult(
+        recommendations=[
+            Recommendation(
+                path=r"C:\Temp\gone.tmp",
+                size=4096,
+                category=FileCategory.TEMPORARY,
+                action=RecommendationAction.DELETE,
+                risk=RecommendationRisk.LOW,
+                reason="Hypothetical future policy.",
+            ),
+            Recommendation(
+                path=r"C:\Temp\keep.tmp",
+                size=8192,
+                category=FileCategory.TEMPORARY,
+                action=RecommendationAction.REVIEW,
+                risk=RecommendationRisk.LOW,
+                reason="Needs a look.",
+            ),
+        ]
+    )
+
+    assert result.deletable_size == 4096
+    assert result.review_size == 8192
+
+
+def test_serialized_analysis_reports_both_sizes_separately():
+    file = make_file(r"C:\Windows\Temp\test.tmp", 5000)
+
+    data = analysis_to_dict(analyze_tree(file))
+
+    assert data["review_size"] == 5000
+    assert data["deletable_size"] == 0
+    assert "total_recommended_size" not in data

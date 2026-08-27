@@ -55,7 +55,13 @@ def analysis_to_dict(
 ) -> dict:
     return {
         "total_files": result.total_files,
-        "total_recommended_size": result.total_recommended_size,
+        # Two numbers, never one. `review_size` is attention required;
+        # `deletable_size` is space actually reclaimable and is 0 under
+        # policy-v1. Summing them, or labelling either "recommended",
+        # would present bytes needing a human decision as bytes the user
+        # can free (§23.7).
+        "review_size": result.review_size,
+        "deletable_size": result.deletable_size,
         "files": [
             {
                 "path": file.path,

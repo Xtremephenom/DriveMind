@@ -5,6 +5,7 @@ from backend.services.dataset.writer import (
     case_to_training_example,
     write_jsonl,
 )
+from backend.services.decision.engine import POLICY_VERSION
 
 
 def test_case_to_training_example():
@@ -64,3 +65,36 @@ def test_write_jsonl(tmp_path):
         assert "case_id" in data
         assert "prompt" in data
         assert "response" in data
+
+
+# --- Provenance (§514/§516) -------------------------------------------
+
+
+def test_every_row_records_the_policy_that_labelled_it():
+    """
+    A row that travels without its policy version is an uninterpretable
+    label. Asserted per row rather than once per file because the file is
+    what gets uploaded, and split apart, and resampled.
+    """
+
+    cases = generate_cases(5, seed=42)
+
+    for case in cases:
+        example = case_to_training_example(case)
+
+        assert example["policy_version"] == POLICY_VERSION
+
+
+def test_the_policy_version_is_not_part_of_the_response_contract():
+    """
+    The model is asked for exactly `{action, risk, explanation}`. Putting
+    provenance inside `response` would make the training target disagree
+    with the prompt -- the shape of the defect that made every
+    contract-conformant answer unparseable once already.
+    """
+
+    example = case_to_training_example(generate_cases(1, seed=42)[0])
+
+    assert set(example["response"]) == {"action", "risk", "explanation"}
+    assert "policy_version" not in example["response"]
+    assert "policy_version" not in example["prompt"]

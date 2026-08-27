@@ -1,8 +1,29 @@
+# DriveMind dependencies.
+#
+# Every pin here is either imported by the code or required at runtime by
+# something that is. Four pins were removed after checking both: `psutil`,
+# `pywin32`, `python-dotenv`, and `PyYAML` were imported by no module and
+# reached by no reverse dependency -- verified by running the full suite
+# with those imports blocked at `sys.meta_path` (429 passed). Each was
+# widening the supply-chain surface for nothing (§297).
+#
+# `pywin32` is the one to expect back: closing ADR 0002 Gap 1 needs a
+# share-mode probe to populate `is_locked`. It returns with that pass, not
+# before.
+
+# --- Runtime: the development HTTP interface (§29/§273) ----------------
+# Development-only. Not the shipping product surface. See docs/security.md.
 fastapi==0.141.1
 uvicorn==0.52.4
+
+# --- Test ---------------------------------------------------------------
 pytest==9.1.1
-psutil==7.2.2
-pywin32==312
-python-dotenv==1.2.3
-PyYAML==6.0.3
+
+# `httpx2` is imported by no DriveMind module, but it is not unused:
+# `starlette.testclient` does `import httpx2 as httpx`, so
+# `fastapi.testclient.TestClient` -- which tests/test_api.py uses -- does
+# not work without it. Plain `httpx` is not installed. It is the
+# Pydantic-maintained successor to httpx (github.com/pydantic/httpx2,
+# BSD-3-Clause), not a typosquat; an earlier pass flagged it as one and
+# was wrong.
 httpx2==2.12.0

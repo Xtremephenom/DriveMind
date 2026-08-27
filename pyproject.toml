@@ -1,0 +1,35 @@
+[project]
+name = "drivemind"
+version = "0.1.0"
+description = "Local-first Windows disk intelligence and safe-cleanup assistant"
+readme = "README.md"
+
+# 3.12 is the lowest version this has been *run* on, not the lowest it
+# could work on. Every module under `backend/` imports and byte-compiles
+# under 3.12.0, verified directly. Nothing lower is installed here, so
+# claiming `>=3.10` would be a guess presented as a requirement.
+#
+# Development uses 3.14.2 (`.venv/`). The machine's default `python` is
+# 3.12.0 and has no pytest installed, which is why README.md tells you to
+# invoke the venv interpreter by path rather than relying on `python`.
+requires-python = ">=3.12"
+
+dependencies = [
+    # The development HTTP interface only (§29/§273). Not a shipping
+    # product surface -- see docs/security.md for what confines it.
+    "fastapi==0.141.1",
+    "uvicorn==0.52.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    # Required by fastapi.testclient.TestClient via
+    # starlette.testclient, which does `import httpx2 as httpx`.
+    # Imported by no DriveMind module; tests/test_api.py does not run
+    # without it. See the note in requirements.txt.
+    "httpx2==2.12.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

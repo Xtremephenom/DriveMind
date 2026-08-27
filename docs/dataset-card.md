@@ -6,9 +6,15 @@
 - **Red-team seed:** [`backend/services/dataset/scenarios.py`](../backend/services/dataset/scenarios.py)
 - **Build + integrity gate:** [`backend/services/dataset/build.py`](../backend/services/dataset/build.py)
 - **Seed:** `42`
-- **Repository state at build time:** `5c27bc3` plus the uncommitted Phase 0–3
-  working tree. Reproducible from the seed by re-running the command below;
-  the commit hash must be re-recorded here once this pass is committed.
+- **Repository state at build time:** `3a2ee2a` — the Phase 0–4 checkpoint,
+  which is the commit that contains the generator, the labeler, the build
+  gates, and the `policy-v1` engine that produced every label here.
+- **The corpus itself is not committed.** `.gitignore` excludes `data/`, so a
+  clone has no rows until the rebuild below is run. That is safe because the
+  build is deterministic from seed `42` at a given commit: rebuilding at
+  `3a2ee2a` reproduces these files byte for byte. It also means a corpus on a
+  training machine is only interpretable via the `policy_version` stamped on
+  each row, which is why every row carries it.
 
 Rebuild:
 

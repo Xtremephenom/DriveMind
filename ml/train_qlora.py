@@ -2,6 +2,10 @@
 QLoRA fine-tune of a causal LM on DriveMind's training split.
 
     python -m ml.train_qlora --model Qwen/Qwen3-4B --out artifacts/qlora
+
+    python -m torch.distributed.run --nproc_per_node=2 \\
+        -m ml.train_qlora --model Qwen/Qwen3-4B --out artifacts/qlora
+
     python -m ml.eval_holdout --model Qwen/Qwen3-4B --adapter artifacts/qlora
 
 Written for 2x Tesla T4 (Kaggle), which is the constraint that shapes
@@ -9,6 +13,23 @@ every default here: 16 GB per card, no bfloat16, no flash-attention. The
 development machine is a 4 GB RTX 3050 -- enough to run inference with
 offload, not enough to train a 4B model, which is why this script is
 written to be *read* locally and *run* elsewhere.
+
+The second form above is **data** parallelism -- one full model replica
+per card, gradients all-reduced, roughly half the wall clock. It is not
+the same thing as `device_map="auto"` across two cards, which is *model*
+parallelism: that splits one replica's layers over both devices and then
+runs them in sequence, so card 1 waits while card 0 computes and the pair
+is slower than a single card once transfers are counted. A 4B model in
+4-bit NF4 is ~2.5 GB and fits one 16 GB T4 many times over, so there is
+nothing to split and everything to replicate.
+
+`--grad-accum` is per rank, so the effective batch is
+`batch_size * grad_accum * world_size`. Halve `--grad-accum` when you
+double the process count or you have silently doubled the batch and
+changed the recipe. `drivemind_run.json` records `world_size` alongside
+the effective batch for exactly this reason: a run at world size 2 does
+not produce the same adapter as the same flags at world size 1, because
+the data order and the gradient reduction both differ (§514/§516).
 
 Four choices that are easy to get wrong, and wrong in ways that produce a
 plausible-looking number:
@@ -43,6 +64,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -79,6 +101,42 @@ LORA_TARGETS = (
 
 class TrainingDataError(RuntimeError):
     """The rows on disk are not usable for training. Nothing has run."""
+
+
+def ddp_world() -> tuple[int, int, int]:
+    """
+    `(local_rank, rank, world_size)` as the launcher set them.
+
+    Read from the environment rather than from `torch.distributed`
+    because `device_map` has to be decided *before* the process group
+    exists -- `Trainer` is what initialises it, and by then the weights
+    are already placed. `torchrun` sets all three variables; a plain
+    `python -m` run sets none, and the fallbacks make that path
+    byte-identical to what this script did before it could run
+    distributed at all.
+    """
+
+    return (
+        int(os.environ.get("LOCAL_RANK", 0)),
+        int(os.environ.get("RANK", 0)),
+        int(os.environ.get("WORLD_SIZE", 1)),
+    )
+
+
+def announce(*parts: object) -> None:
+    """
+    Print on rank 0 only.
+
+    Two ranks writing the same line to one terminal produces output where
+    every line appears twice and neither copy says which process wrote
+    it. Worse on a notebook, where the two streams interleave mid-line.
+    The rank is re-read each call rather than captured, so this is safe
+    to use from module-level functions that run before `main` has decided
+    anything.
+    """
+
+    if int(os.environ.get("RANK", 0)) == 0:
+        print(*parts)
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -219,7 +277,7 @@ def encode_split(
 
     scored = sum(1 for label in examples[0].labels if label != -100)
 
-    print(
+    announce(
         f"  {name:<11} {len(examples)} rows, tokens min {min(lengths)}"
         f" / mean {sum(lengths) // len(lengths)} / max {max(lengths)},"
         f" {scored} scored on row 0"
@@ -303,7 +361,7 @@ def load_for_training(
     model_id: str,
     *,
     lora_rank: int = 16,
-    device_map: str = "auto",
+    device_map: str | dict[str, int] = "auto",
 ) -> Any:
     """
     Load the base model 4-bit and wrap it in a LoRA adapter.
@@ -312,6 +370,16 @@ def load_for_training(
     it on makes `transformers` warn and silently disable checkpointing,
     which then OOMs on a T4 at a batch size that was chosen assuming
     checkpointing was active.
+
+    `device_map` is the one argument that has to change under data
+    parallelism, and getting it wrong is quiet rather than loud. Every
+    rank sees every card, so `"auto"` makes *each* of two ranks shard one
+    replica across *both* cards: four half-models on two devices, each
+    rank's forward pass crossing the PCIe bus twice per layer, and both
+    ranks contending for the same memory. It runs. It is several times
+    slower than one card, and nothing in the logs says so. Under
+    `torchrun` the caller passes `{"": local_rank}`, which is the whole
+    replica pinned to this rank's own device.
     """
 
     from peft import (
@@ -357,7 +425,8 @@ def load_for_training(
         ),
     )
 
-    model.print_trainable_parameters()
+    if int(os.environ.get("RANK", 0)) == 0:
+        model.print_trainable_parameters()
 
     return model
 
@@ -385,6 +454,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=42)
 
     parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=-1,
+        help=(
+            "stop after this many optimizer steps instead of completing "
+            "--epochs. For calibration: a 20-step run on the real weights "
+            "proves the chosen batch size fits both cards and measures "
+            "throughput, before the full run is committed to. The adapter "
+            "it writes is stamped `partial_run_max_steps` so it cannot be "
+            "mistaken for a finished one."
+        ),
+    )
+
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help=(
@@ -400,11 +483,18 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
-    print("DriveMind QLoRA fine-tune")
-    print(f"  policy version  {POLICY_VERSION}")
-    print(f"  base model      {args.model}")
-    print(f"  adapter out     {args.out}")
-    print()
+    local_rank, _, world_size = ddp_world()
+
+    announce("DriveMind QLoRA fine-tune")
+    announce(f"  policy version  {POLICY_VERSION}")
+    announce(f"  base model      {args.model}")
+    announce(f"  adapter out     {args.out}")
+    announce(
+        f"  parallelism     {world_size} rank(s), "
+        f"effective batch {args.batch_size * args.grad_accum * world_size}"
+        f" = {args.batch_size} x {args.grad_accum} accum x {world_size}"
+    )
+    announce()
 
     train_rows = load_rows(args.data_dir / "train.jsonl")
     validation_rows = load_rows(args.data_dir / "validation.jsonl")
@@ -432,12 +522,12 @@ def main(argv: list[str] | None = None) -> int:
             1 for label in example.labels if label == -100
         )
 
-        print()
-        print(
+        announce()
+        announce(
             f"  masking check   {prompt_tokens} prompt tokens at -100, "
             f"{len(example.labels) - prompt_tokens} scored"
         )
-        print("  scored text     " + repr(
+        announce("  scored text     " + repr(
             tokenizer.decode(
                 [
                     token
@@ -450,24 +540,45 @@ def main(argv: list[str] | None = None) -> int:
                 ]
             )
         ))
-        print("\n  dry run: nothing trained, nothing written.")
+        announce("\n  dry run: nothing trained, nothing written.")
 
         return 0
 
     import torch
     from transformers import Trainer, TrainingArguments
 
-    model = load_for_training(args.model, lora_rank=args.lora_rank)
+    model = load_for_training(
+        args.model,
+        lora_rank=args.lora_rank,
+        # One replica per rank, pinned to that rank's own card. See
+        # `load_for_training` for why "auto" is wrong here and quiet
+        # about being wrong.
+        device_map="auto" if world_size == 1 else {"": local_rank},
+    )
 
     dtype = pick_dtype()
 
     training_arguments = TrainingArguments(
         output_dir=str(args.out / "checkpoints"),
         num_train_epochs=args.epochs,
+        # -1 is "no cap, use --epochs". Anything above 0 wins over epochs.
+        max_steps=args.max_steps,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum,
         gradient_checkpointing=True,
+        # Non-reentrant checkpointing, which is not a style preference.
+        # The reentrant implementation runs the recomputed forward outside
+        # autograd's view, so DDP's parameter hooks never fire for the
+        # checkpointed blocks and the all-reduce either hangs waiting for
+        # gradients that will not arrive or raises about parameters marked
+        # ready twice. Non-reentrant keeps the hooks.
+        gradient_checkpointing_kwargs={"use_reentrant": False},
+        # Every trainable parameter here is a LoRA adapter and every one
+        # of them is used in every forward pass -- the frozen base weights
+        # are not registered with DDP at all. Leaving the search on costs
+        # a full graph traversal per step to discover that.
+        ddp_find_unused_parameters=False,
         learning_rate=args.learning_rate,
         lr_scheduler_type="cosine",
         # A float in [0, 1) is a *ratio* of total steps, an int is an exact
@@ -511,6 +622,13 @@ def main(argv: list[str] | None = None) -> int:
 
     trainer.train()
 
+    # Rank 0 writes; the others return. Every rank holds an identical
+    # adapter after `load_best_model_at_end`, so letting all of them write
+    # would not corrupt the result by disagreement -- it would corrupt it
+    # by two processes writing the same `.safetensors` at the same time.
+    if not trainer.is_world_process_zero():
+        return 0
+
     args.out.mkdir(parents=True, exist_ok=True)
 
     trainer.model.save_pretrained(str(args.out))
@@ -519,31 +637,45 @@ def main(argv: list[str] | None = None) -> int:
     # Written next to the adapter because an adapter travels. Without it,
     # a directory of LoRA weights says nothing about which policy's labels
     # it learned or which base model it belongs on top of (§514/§516).
+    record = {
+        "base_model": args.model,
+        "policy_version": POLICY_VERSION,
+        "train_rows": len(train_rows),
+        "validation_rows": len(validation_rows),
+        "epochs": args.epochs,
+        # The product of all three, because the two ranks of a data-
+        # parallel run contribute to one optimizer step. Recording
+        # `batch * accum` here would understate it by the world size and
+        # make two runs look like the same recipe when they are not.
+        "world_size": world_size,
+        "per_device_batch_size": args.batch_size,
+        "grad_accum": args.grad_accum,
+        "effective_batch_size": (
+            args.batch_size * args.grad_accum * world_size
+        ),
+        "learning_rate": args.learning_rate,
+        "lora_rank": args.lora_rank,
+        "lora_targets": list(LORA_TARGETS),
+        "max_length": args.max_length,
+        "precision": str(dtype).removeprefix("torch."),
+        "seed": args.seed,
+        "selection": "eval_loss on data/validation.jsonl",
+    }
+
+    if args.max_steps > 0:
+        # A calibration adapter and a finished one are the same files in
+        # the same layout. This is the only thing that distinguishes them,
+        # so it is recorded rather than left to whoever remembers which
+        # directory was which (§555).
+        record["partial_run_max_steps"] = args.max_steps
+
     (args.out / "drivemind_run.json").write_text(
-        json.dumps(
-            {
-                "base_model": args.model,
-                "policy_version": POLICY_VERSION,
-                "train_rows": len(train_rows),
-                "validation_rows": len(validation_rows),
-                "epochs": args.epochs,
-                "effective_batch_size": args.batch_size * args.grad_accum,
-                "learning_rate": args.learning_rate,
-                "lora_rank": args.lora_rank,
-                "lora_targets": list(LORA_TARGETS),
-                "max_length": args.max_length,
-                "precision": str(dtype).removeprefix("torch."),
-                "seed": args.seed,
-                "selection": "eval_loss on data/validation.jsonl",
-            },
-            indent=2,
-        )
-        + "\n",
+        json.dumps(record, indent=2) + "\n",
         encoding="utf-8",
     )
 
-    print(f"\n  adapter written to {args.out}")
-    print(
+    announce(f"\n  adapter written to {args.out}")
+    announce(
         "\n  Nothing has been measured yet. Training loss is not a metric "
         "anyone\n  should read; the four that matter come from the "
         "held-out sets, and\n  the base model has to be measured in this "

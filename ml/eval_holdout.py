@@ -24,6 +24,7 @@ baseline cases, under a banner that says what they are.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
@@ -72,6 +73,17 @@ def describe_environment() -> list[str]:
     if not torch.cuda.is_available():
         lines.append("  device          cpu (no CUDA device visible)")
         return lines
+
+    # The physical card, not the index this process sees. Two runs pinned
+    # to different cards of the same machine both report "device 0",
+    # because CUDA renumbers what is visible from zero -- so the mask is
+    # the only thing in the report that distinguishes them. It matters as
+    # soon as a base run and a tuned run are placed on separate cards
+    # (§514/§516).
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+
+    if visible is not None:
+        lines.append(f"  visible cards   CUDA_VISIBLE_DEVICES={visible!r}")
 
     for index in range(torch.cuda.device_count()):
         properties = torch.cuda.get_device_properties(index)

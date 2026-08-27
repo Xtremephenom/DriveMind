@@ -211,17 +211,17 @@ backend/
   utils/filesystem.py    reparse-point probes; both fail closed
 data/                    synthetic corpus (5 files, 10,126 rows)
 docs/                    architecture, security, threat model, cards, ADRs
-ml/                      model runtime, held-out eval CLI, QLoRA fine-tune
-tests/                   27 modules, 4,147 lines
+ml/                      model runtime, held-out eval CLIs, QLoRA fine-tune
+tests/                   27 modules, 4,175 lines
 ```
 
-39 modules, 4,222 lines under `backend/`. The tests are slightly larger
+39 modules, 4,207 lines under `backend/`. The tests are slightly larger
 than the code they cover.
 
 `ml/` is outside `backend/` on purpose: it is the only part of the
 repository that imports `torch` and `transformers`, and
 `tests/test_read_only.py::test_only_the_api_layer_depends_on_a_third_party_package`
-fails if anything under `backend/` ever does. Its three modules, 1,213
+fails if anything under `backend/` ever does. Its four modules, 2,244
 lines, are not needed to run the product or its tests, and
 `ml/requirements.txt` is deliberately separate from `requirements.txt`.
 

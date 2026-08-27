@@ -196,17 +196,26 @@ backend/
     ai_safety/validator.py  the gate; re-derives its own ceiling
     ai_review.py         the only path a model may touch a recommendation
     ai_evaluator.py      four metrics against re-derived ground truth
-    ai_baseline.py       runnable baseline harness
+    ai_baseline.py       runnable baseline harness (12 hand-built cases)
+    ai_holdout.py        the held-out measurement; verifies the split first
     ai_rule_based.py     deterministic stand-in; NOT a model
     dataset/             generator, labeler, writer, split, scenarios, build
   utils/filesystem.py    reparse-point probes; both fail closed
 data/                    synthetic corpus (5 files, 10,126 rows)
 docs/                    architecture, security, threat model, cards, ADRs
+ml/                      model runtime, held-out eval CLI, QLoRA fine-tune
 tests/                   27 modules, 4,147 lines
 ```
 
-38 modules, 3,839 lines under `backend/`. The tests are slightly larger
+39 modules, 4,222 lines under `backend/`. The tests are slightly larger
 than the code they cover.
+
+`ml/` is outside `backend/` on purpose: it is the only part of the
+repository that imports `torch` and `transformers`, and
+`tests/test_read_only.py::test_only_the_api_layer_depends_on_a_third_party_package`
+fails if anything under `backend/` ever does. Its three modules, 1,213
+lines, are not needed to run the product or its tests, and
+`ml/requirements.txt` is deliberately separate from `requirements.txt`.
 
 ## The architectural claim
 

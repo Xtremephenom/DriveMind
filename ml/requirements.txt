@@ -1,0 +1,44 @@
+# DriveMind ML-track dependencies.
+#
+# Deliberately separate from the repository's requirements.txt. Nothing
+# under `backend/` imports any of this, and
+# tests/test_read_only.py::test_only_the_api_layer_depends_on_a_third_party_package
+# fails if anything ever does. The decision core runs on the standard
+# library; a model runtime is an adapter that sits outside it, and its
+# dependencies should not be installed to run the product or its tests.
+#
+# Every version below was resolved against this repository's interpreter
+# (CPython 3.14.2, win_amd64) with
+#   pip install --dry-run --no-deps --report -
+# so these are versions that exist for this platform, not plausible ones.
+#
+# Install:
+#   .venv/Scripts/python.exe -m pip install -r ml/requirements.txt
+#
+# On Kaggle, torch and the CUDA runtime are already present and pinned to
+# the image. Install the other four and leave torch alone -- reinstalling
+# it there is a multi-gigabyte download that can also break the driver
+# pairing.
+
+# --- The runtime -------------------------------------------------------
+# A cp314 win_amd64 wheel exists (torch-2.13.0-cp314-cp314-win_amd64.whl),
+# so the interpreter is not what blocks local training. 4 GB of VRAM is.
+torch==2.13.0
+
+# --- The model API -----------------------------------------------------
+# 5.x, and the version matters more than usual. Between 4.x and 5.x
+# `from_pretrained(torch_dtype=)` became `dtype=`, `evaluation_strategy`
+# became `eval_strategy`, `warmup_ratio` folded into `warmup_steps` (a
+# float is read as a ratio), and `Trainer(tokenizer=)` became
+# `processing_class=`. ml/ is written against the 5.x spellings; on 4.x it
+# raises on the first TrainingArguments construction.
+transformers==5.16.1
+
+# --- QLoRA -------------------------------------------------------------
+peft==0.20.0
+accelerate==1.14.0
+
+# 4-bit NF4 quantization and `paged_adamw_8bit`. A win_amd64 wheel exists,
+# but it is CUDA-only at runtime -- it imports on a CPU-only machine and
+# fails when asked to quantize.
+bitsandbytes==0.50.2

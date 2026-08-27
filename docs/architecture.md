@@ -11,10 +11,16 @@ Two orthogonal decompositions, both real in the tree:
 - **The layers** — PRESENTATION → APPLICATION SERVICES → DOMAIN LOGIC →
   INFRASTRUCTURE. What may call what.
 
-Measured, not estimated: 38 modules under `backend/`, 3,839 lines; 27 test
-modules, 4,147 lines. Tests are somewhat larger than the code they cover,
+Measured, not estimated: 39 modules under `backend/`, 4,222 lines; 27 test
+modules, 4,147 lines. Tests are about the same size as the code they cover,
 which is deliberate — most of what this codebase asserts is a
 safety property, and a safety property with no test is a comment.
+
+`ml/` is counted in neither figure. It holds the model runtime, the
+held-out evaluation CLI, and the QLoRA fine-tune (3 modules, 1,213 lines),
+and it sits outside `backend/` because it is the only code here that
+imports a third-party ML package. Nothing in the three layers below
+PRESENTATION may, and a test enforces it.
 
 ## The pipeline
 
